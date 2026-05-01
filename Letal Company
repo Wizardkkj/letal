@@ -1,229 +1,215 @@
---// SERVICES
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
+-- SERVICES
 local ws = game:GetService("Workspace")
-local rs = game:GetService("ReplicatedStorage")
-local UIS = game:GetService("UserInputService")
+local plr = game:GetService("Players").LocalPlayer
 
---// PATHS
-local monstersFolder = ws:WaitForChild("Monsters")
-local itemsRoot = ws:WaitForChild("ProcGenGenerated"):WaitForChild("ProcGenItems")
-local itemsLib = rs:WaitForChild("Items")
+-- VARIÁVEIS
+local ESP_ITEMS = false
+local ESP_MONSTERS = false
 
---// STATE
-getgenv().ESP_MOBS = false
-getgenv().ESP_ITEMS = false
+local ESP_CACHE = {}
+local MONSTER_CACHE = {}
+local ITEM_LIST = {}
 
-local itemIndex = {}
-local highlights = {}
+-- 🎨 CORES DOS ORES
+local ORE_COLORS = {
+    ["Gold Ore"] = Color3.fromRGB(255, 215, 0),
+    ["Iron Ore"] = Color3.fromRGB(90, 90, 90),
+    ["Jade Ore"] = Color3.fromRGB(0, 200, 100),
+    ["Amber Ore"] = Color3.fromRGB(255, 140, 0),
+    ["Amethyst Ore"] = Color3.fromRGB(170, 0, 255),
+}
 
---// UTILS
-local function getHRP()
-    local c = player.Character
-    return c and c:FindFirstChild("HumanoidRootPart")
-end
-
-local function highlight(inst, color)
-    if highlights[inst] then return end
-    local h = Instance.new("Highlight")
-    h.FillTransparency = 1
-    h.OutlineColor = color
-    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    h.Parent = inst
-    highlights[inst] = h
-end
-
-local function removeHighlight(inst)
-    if highlights[inst] then
-        highlights[inst]:Destroy()
-        highlights[inst] = nil
+local function getOreColor(name)
+    if ORE_COLORS[name] then
+        return ORE_COLORS[name]
     end
+    if string.find(name, "Ore") then
+        return Color3.fromRGB(180,180,180)
+    end
+    return Color3.fromRGB(0,255,255)
 end
 
-local function getColor(name)
-    return Color3.fromRGB(
-        (string.len(name)*50)%255,
-        (string.len(name)*80)%255,
-        200
-    )
-end
+-- GUI
+local gui = Instance.new("ScreenGui", game.CoreGui)
+local main = Instance.new("Frame", gui)
+main.Size = UDim2.new(0,220,0,200)
+main.Position = UDim2.new(0.05,0,0.3,0)
+main.BackgroundColor3 = Color3.fromRGB(30,30,30)
+main.Active = true
+main.Draggable = true
+Instance.new("UICorner", main)
 
---// SCAN
-local function scan()
-    itemIndex = {}
+local mini = Instance.new("TextButton", main)
+mini.Size = UDim2.new(0,30,0,30)
+mini.Position = UDim2.new(1,-35,0,5)
+mini.Text = "-"
+mini.TextColor3 = Color3.fromRGB(255,255,255)
+mini.Font = Enum.Font.GothamSemibold
+mini.BackgroundColor3 = Color3.fromRGB(50,50,50)
+Instance.new("UICorner", mini)
 
-    for _,container in ipairs(itemsRoot:GetChildren()) do
-        for _,obj in ipairs(container:GetDescendants()) do
-            if itemsLib:FindFirstChild(obj.Name) then
-                itemIndex[obj.Name] = itemIndex[obj.Name] or {instances = {}, color = getColor(obj.Name)}
-                table.insert(itemIndex[obj.Name].instances, obj)
-            end
+local minimized = false
+mini.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    for _,v in pairs(main:GetChildren()) do
+        if v ~= mini and v:IsA("GuiObject") then
+            v.Visible = not minimized
         end
     end
-end
-
---// ESP UPDATE
-local function updateESP()
-    for _,h in pairs(highlights) do h:Destroy() end
-    highlights = {}
-
-    if getgenv().ESP_MOBS then
-        for _,m in ipairs(monstersFolder:GetChildren()) do
-            if m:IsA("Model") then
-                highlight(m, Color3.fromRGB(255,80,80))
-            end
-        end
-    end
-
-    if getgenv().ESP_ITEMS then
-        for name,data in pairs(itemIndex) do
-            for _,inst in ipairs(data.instances) do
-                highlight(inst, data.color)
-            end
-        end
-    end
-end
-
---// TP
-local function tp(inst)
-    local hrp = getHRP()
-    if not hrp then return end
-
-    local pos
-    if inst:IsA("Model") then
-        local p = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart")
-        if p then pos = p.Position end
-    elseif inst:IsA("BasePart") then
-        pos = inst.Position
-    end
-
-    if pos then
-        hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
-    end
-end
-
-local function tpItem(name)
-    local data = itemIndex[name]
-    if not data or #data.instances == 0 then return end
-
-    local target = table.remove(data.instances,1)
-    tp(target)
-    removeHighlight(target)
-
-    if #data.instances == 0 then
-        itemIndex[name] = nil
-    end
-end
-
---// GUI
-local gui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
-gui.ResetOnSpawn = false
-
-local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.new(0,260,0,340)
-frame.Position = UDim2.new(0.05,0,0.3,0)
-frame.BackgroundColor3 = Color3.fromRGB(35,35,40)
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0,12)
-
--- DRAG
-local dragging, dragStart, startPos
-frame.InputBegan:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = i.Position
-        startPos = frame.Position
-        i.Changed:Connect(function()
-            if i.UserInputState == Enum.UserInputState.End then dragging = false end
-        end)
-    end
+    main.Size = minimized and UDim2.new(0,120,0,40) or UDim2.new(0,220,0,200)
 end)
 
-UIS.InputChanged:Connect(function(i)
-    if dragging then
-        local delta = i.Position - dragStart
-        frame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
--- HEADER
-local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.new(1,0,0,30)
-title.Text = "ESP Scanner"
-title.BackgroundTransparency = 1
-title.TextColor3 = Color3.new(1,1,1)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 14
-
--- BOTÕES
-local function button(y,text,callback)
-    local b = Instance.new("TextButton", frame)
-    b.Size = UDim2.new(1,-20,0,30)
-    b.Position = UDim2.new(0,10,0,y)
+local function newBtn(text, posY)
+    local b = Instance.new("TextButton", main)
+    b.Size = UDim2.new(0.9,0,0,25)
+    b.Position = UDim2.new(0.05,0,0,posY)
     b.Text = text
-    b.BackgroundColor3 = Color3.fromRGB(60,60,70)
-    b.TextColor3 = Color3.new(1,1,1)
+    b.BackgroundColor3 = Color3.fromRGB(45,45,45)
+    b.TextColor3 = Color3.fromRGB(255,255,255)
+    b.Font = Enum.Font.GothamSemibold
+    b.TextScaled = true
     Instance.new("UICorner", b)
-
-    b.MouseButton1Click:Connect(callback)
     return b
 end
 
-button(35,"ESP Mobs",function()
-    getgenv().ESP_MOBS = not getgenv().ESP_MOBS
-    updateESP()
-end)
+local espItemBtn = newBtn("ESP Itens: OFF", 40)
+local espMobBtn = newBtn("ESP Monsters: OFF", 70)
+local scanBtn = newBtn("SCAN ITENS", 100)
+local sellBtn = newBtn("TP SELL", 130)
 
-button(70,"ESP Items",function()
-    getgenv().ESP_ITEMS = not getgenv().ESP_ITEMS
-    updateESP()
-end)
+-- LISTA
+local listFrame = Instance.new("Frame", main)
+listFrame.Position = UDim2.new(0,0,0,160)
+listFrame.BackgroundTransparency = 1
+Instance.new("UIListLayout", listFrame)
 
-button(105,"Scan",function()
-    scan()
-    updateESP()
-    task.wait()
-    refresh()
-end)
+-- 🔥 ESP ITEM
+local function addItemESP(item)
+    if ESP_CACHE[item] then return end
+    if not item:FindFirstChild("Handle") then return end
 
--- LISTA SCROLL (IMPORTANTE PRA MOBILE)
-local scroll = Instance.new("ScrollingFrame", frame)
-scroll.Size = UDim2.new(1,-20,1,-150)
-scroll.Position = UDim2.new(0,10,0,140)
-scroll.CanvasSize = UDim2.new(0,0,0,0)
-scroll.ScrollBarThickness = 6
-scroll.BackgroundTransparency = 1
+    local hl = Instance.new("Highlight")
+    hl.Name = "ESP"
+    hl.Adornee = item.Handle
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.FillColor = getOreColor(item.Name)
+    hl.FillTransparency = 0.7
+    hl.OutlineColor = getOreColor(item.Name)
+    hl.OutlineTransparency = 0
+    hl.Parent = item.Handle
 
-local layout = Instance.new("UIListLayout", scroll)
-layout.Padding = UDim.new(0,5)
-
-function refresh()
-    for _,c in ipairs(scroll:GetChildren()) do
-        if c:IsA("TextButton") then c:Destroy() end
-    end
-
-    for name,data in pairs(itemIndex) do
-        local b = Instance.new("TextButton", scroll)
-        b.Size = UDim2.new(1,0,0,28)
-        b.Text = name.." ("..#data.instances..")"
-        b.BackgroundColor3 = Color3.fromRGB(50,50,60)
-        b.TextColor3 = Color3.new(1,1,1)
-        Instance.new("UICorner", b)
-
-        b.MouseButton1Click:Connect(function()
-            tpItem(name)
-            refresh()
-        end)
-    end
-
-    task.wait()
-    scroll.CanvasSize = UDim2.new(0,0,0,layout.AbsoluteContentSize.Y + 10)
+    ESP_CACHE[item] = hl
 end
 
--- INIT
-scan()
-refresh()
+local function clearItemESP()
+    for _,v in pairs(ESP_CACHE) do v:Destroy() end
+    ESP_CACHE = {}
+end
+
+-- 🔥 ESP MONSTRO (FIX BIRD)
+local function addMonsterESP(mob)
+    if MONSTER_CACHE[mob] then return end
+
+    local part = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChildWhichIsA("BasePart")
+    if not part then return end
+
+    local hl = Instance.new("Highlight")
+    hl.Name = "ESP"
+    hl.Adornee = mob
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.FillColor = Color3.fromRGB(255,0,0)
+    hl.FillTransparency = 0.75
+    hl.OutlineColor = Color3.fromRGB(255,0,0)
+    hl.OutlineTransparency = 0
+    hl.Parent = mob
+
+    MONSTER_CACHE[mob] = hl
+end
+
+local function clearMonsterESP()
+    for _,v in pairs(MONSTER_CACHE) do v:Destroy() end
+    MONSTER_CACHE = {}
+end
+
+-- 🔁 LOOP AUTOMÁTICO ITENS
+task.spawn(function()
+    while true do
+        if ESP_ITEMS then
+            local folder = ws:FindFirstChild("ProcGenGenerated")
+            if folder and folder:FindFirstChild("ProcGenItems") then
+                for _,item in pairs(folder.ProcGenItems:GetChildren()) do
+                    addItemESP(item)
+                end
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+-- 🔁 LOOP MONSTROS
+task.spawn(function()
+    while true do
+        if ESP_MONSTERS then
+            for _,mob in pairs(ws.Monsters:GetChildren()) do
+                addMonsterESP(mob)
+            end
+
+            -- força BirdMonster
+            if ws.Monsters:FindFirstChild("BirdMonster") then
+                addMonsterESP(ws.Monsters.BirdMonster)
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+-- BOTÕES
+espItemBtn.MouseButton1Click:Connect(function()
+    ESP_ITEMS = not ESP_ITEMS
+    espItemBtn.Text = "ESP Itens: "..(ESP_ITEMS and "ON" or "OFF")
+    if not ESP_ITEMS then clearItemESP() end
+end)
+
+espMobBtn.MouseButton1Click:Connect(function()
+    ESP_MONSTERS = not ESP_MONSTERS
+    espMobBtn.Text = "ESP Monsters: "..(ESP_MONSTERS and "ON" or "OFF")
+    if not ESP_MONSTERS then clearMonsterESP() end
+end)
+
+scanBtn.MouseButton1Click:Connect(function()
+    for _,v in pairs(listFrame:GetChildren()) do
+        if v:IsA("TextButton") then v:Destroy() end
+    end
+
+    ITEM_LIST = {}
+    local folder = ws.ProcGenGenerated.ProcGenItems
+
+    for _,item in pairs(folder:GetChildren()) do
+        ITEM_LIST[item.Name] = ITEM_LIST[item.Name] or {}
+        table.insert(ITEM_LIST[item.Name], item)
+    end
+
+    for name,items in pairs(ITEM_LIST) do
+        local btn = newBtn(name.." ("..#items..")", 0)
+        btn.Parent = listFrame
+
+        btn.MouseButton1Click:Connect(function()
+            local target = items[1]
+            if target then
+                plr.Character:PivotTo(target.Handle.CFrame + Vector3.new(0,3,0))
+                table.remove(items,1)
+                btn.Text = name.." ("..#items..")"
+                if #items == 0 then btn:Destroy() end
+            end
+        end)
+    end
+end)
+
+-- TP SELL
+sellBtn.MouseButton1Click:Connect(function()
+    local map = ws.PlacedTiles.Map.Map
+    local part = map:IsA("BasePart") and map or map:FindFirstChildWhichIsA("BasePart")
+    if part then
+        plr.Character:PivotTo(CFrame.new(part.Position + Vector3.new(0,5,-15)))
+    end
+end)
